@@ -1,0 +1,37 @@
+Dictionary
+
+Country - Country name
+
+Region - Region the country is in
+
+Year - Year data was collected
+
+HDI - Human development index ranking
+
+NMR - Neonatal mortality rate (per 1000 live births)
+
+IMR - Infant mortality rate (probability of dying between birth and age 1 per 1000 live birth)
+
+U5MR - Under-five mortality rate (probability of dying by age 5 per 1000 live births)
+
+X5_14MR - Mortality rate for 5-14 year-olds (probability of dying per 1000 children aged 5-14 years)
+
+AMR - Adult mortality rate (probability of dying between 15 and 60 years per1000 population)
+
+LEB - Life expectancy at birth (years); Bothy sexes
+
+LE_60 - Life expectancy at age 60 (years); Both sexes
+
+UA - Underweight adults (BMI<18) as a percentage of population
+
+OA - Overweight adults (BMI>= 25) as a percentage of population
+
+OBA - Obese adults (BMI> 30) as a percentage of population
+
+avg_BMI - Mean adult BMI
+
+ABS - Percentage of the population with access to basic sanitation
+
+HE_GDP - Health expenditure as a percentage of GDP
+
+HE_CAP - Health expenditure per capita

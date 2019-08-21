@@ -1,0 +1,271 @@
+---
+title: "4470 Final Project: Life Expectancy data"
+authors: "Edgar Sokoli, Chris Blackburn, Zereen Ali, Stephen Boursalian"
+date: "April 24th, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+
+This is our final project for MIS 4470. For this project we chose to do data analysis on countries around the world to find out about life expectancy based on 18 variables (15 continuous variables were used). The data used in this project was taken mostly from the World Health Organization and also UNICEF. 
+
+The purpose of this project was to use what we learned this semester to do some productive EDA and linear regressions to find out which variables were most important in relation to life expectancy at birth (LEB).
+
+## Read in data
+
+A complete data dictionary is included in the README file. For the purpose of this project, we shortened/abbreviated many of the variable names. 
+```{r read_in}
+pp <- read.csv(file = "data/ProjectDataComplete.csv", header = TRUE, sep = ",")
+```
+## Load libraries
+```{r load_libraries}
+library(ggplot2)
+library(corrplot)
+library(dplyr)
+library(tidyr)
+library(corrplot)
+library(caret)
+library(MLmetrics)
+library(gbm)
+```
+## Look into dataframe
+
+At first glance, it made sense to change year into a factor. Other than counts of years, we did not need more descriptive statistics about the variable. 
+
+We also included some code to omit the one NA under Health Expenditure per Capita (HE_CAP).
+```{r}
+# preview of data
+pp$Year <- as.factor(pp$Year)
+str(pp)
+summary(pp)
+
+# omit NAs
+pp <- na.omit(pp)
+```
+## Correlation analysis/EDA
+
+Before we dove into correlation analysis, we wanted to standardize the data on a z-score. After the data was normalized, we constructed a visualization to more easily differentiate small and big correlations. 
+
+Once the correlations were visualized, a new dataframe was constructed without variables with high correlation. This would help with our regression models later in the analysis.
+
+A new visualization of variables with low correlations was constructed. 
+```{r}
+# Take out strings for correlations
+#pp2 <- pp[setdiff(colnames(pp), c('Year', 'Country', 'Region'))]
+
+# Standardize to z-scale
+#pp2 <- scale(pp2)
+
+# Make z-scaled data-frame from matrix (helps later in analysis)
+# make a copy of the data frame
+pp3 <- pp[setdiff(colnames(pp), c('Year', 'Country', 'Region'))]
+# use scale() on those columns
+scaledvars <- scale(pp3[, 1-15])
+# use the matrix to write back to the data frame
+pp3[, 1-15] <- scaledvars
+
+# Correlation plots
+cm <- cor(pp3)
+round(cm,2)
+corrplot(cm, method="square", col = terrain.colors(100))
+
+# Take out varibles with high correlation, to avoid multicollinearity
+trimmed_pp <- cor(pp3)
+trimmed <- findCorrelation(trimmed_pp, cutoff = 0.8)
+trimmed <- sort(trimmed)
+clean_df <- pp3[,-c(trimmed)]
+
+# New corr plots
+cm2 <- cor(clean_df)
+round(cm2,2)
+corrplot(cm2, method="square", col = terrain.colors(100))
+```
+## More EDA
+
+For further EDA, we chose to us the ggplot package to get more visualizations of the data.
+
+We began with fancy boxplots for life expectancy at birth by regions of the world, and continued with normal histograms and boxplots of other variables we thought to be inherently significant to capturing life expectancy.
+
+Many attempts were made at trying to construct an animated scatter of HE_CAP, LEB and HDI (Human Development Index metric from WHO), but apparently we needed to download an older version of one of the packages from github. Our efforts were unsuccessful. 
+```{r}
+# Unscaled dataframe for data visualizations
+pp2 <- pp[setdiff(colnames(pp), c('Year', 'Country', 'Region'))]
+
+#Set shortcut for ggplot
+g <- ggplot(data=pp2)
+
+#Faceted wrap of Life Expectancy
+ggplot(data = pp, aes(x="LEB", y=LEB)) + geom_point(aes(group = Region, color = Region)) + facet_wrap(~Region)
+
+#More plotssssss
+g + geom_histogram(aes(x=IMR), fill="darkgreen")
+g + geom_histogram(aes(x=AMR), fill="maroon3")
+g + geom_boxplot(aes(x="", y=HDI), fill="dodgerblue")
+g + geom_boxplot(aes(x="", y=HE_GDP), fill="azure")
+g + geom_boxplot(aes(x="", y=avg_BMI), fill="salmon3")
+
+# # animated scatter by year, source = http://r-statistics.co/Top50-Ggplot2-Visualizations-MasterList-R-Code.html#Animated%20Bubble%20Plot
+
+# library(gganimate)
+# library(gapminder)
+# theme_set(theme_bw())  # pre-set the bw theme.
+# 
+
+# g2 <- ggplot(gapminder, aes(HE_GDP, LEB, size = HDI, frame = Year)) +
+#   geom_point() +
+#   geom_smooth(aes(group = Year), 
+#               method = "lm", 
+#               show.legend = FALSE) +
+#   facet_wrap(~Region, scales = "free") +
+#   scale_x_log10()  # convert to log scale
+# 
+# gganimate(g2, interval=0.2)
+```
+## Set up for linear models
+
+Here we partition the data to a 80%/20% split and create two dataframes for training and validation.
+```{r}
+#Partition
+set.seed(267)
+test_pct <- 0.20
+num_test_recs <- as.integer(test_pct * nrow(pp3))
+
+test_recs <- sample(nrow(pp3), num_test_recs)
+
+pp_train <- pp3[-test_recs,] 
+pp_test <- pp3[test_recs,]
+```
+To begin our regression modeling, we chose to do a null and full model. Including both a null and full model would highlight what the data would look like with the full set and classifiing variables removed, specifcally country, region, and the year, as these were irrelevant to our planned predictions. These models were split into the training set, shown here, and the test data, shown as predNull and predFull below.
+```{r}
+#Test1
+nullModel <- lm(LEB ~ 1, data = pp_train)
+fullModel <- lm(LEB ~ ., data = pp_train)
+
+summary(nullModel)
+summary(fullModel)
+```
+## Model Predictions
+
+We then calculated the mean average error (MAE) for the train and test set for both the null and full models. MAE was our metric for evaluating the effectiveness of our prediction models. 
+```{r}
+#Prediction
+predNull <- predict(nullModel, newdata = pp_test)
+predFull <- predict(fullModel, newdata = pp_test)
+
+#MAE of fit
+maeNull_fit <- MAE(predNull, pp_train$LEB)
+maeNull_fit
+maeFull_fit <- MAE(predFull, pp_train$LEB)
+maeFull_fit
+
+#MAE of test
+maeNull <- MAE(predNull, pp_test$LEB)
+maeNull
+maeFull <- MAE(predFull, pp_test$LEB)
+maeFull
+
+```
+Then we created several other models, exchanging individual variables to see which gave us the most accurate predictions. Model 2 included variables that had a low correlation to life expectancy at birth. Model 3 included variables that had a slightly higher, but still relatively small correlation to life expectancy at birth. Model 4 included the variables that had the smallest correlation values to life expectancy at birth.
+
+We then created fit models for the MAEs for the models mentioned above for both the test and training sets.
+```{r}
+#Additional Models
+Model2 <- lm(LEB ~ OA + OBA + HE_GDP, data = pp_train)
+Model3 <- lm(LEB ~ avg_BMI + X5_14MR + HE_CAP, data = pp_train)
+Model4 <- lm(LEB ~ OBA + avg_BMI, data = pp_train)
+
+summary(Model2)
+summary(Model3)
+summary(Model4)
+
+#Prediction
+predModel2 <- predict(Model2, newdata = pp_test)
+predModel3 <- predict(Model3, newdata = pp_test)
+predModel4 <- predict(Model4, newdata = pp_test)
+
+#MAE of fit
+maeModel2_fit <- MAE(predModel2, pp_train$LEB)
+maeModel2_fit
+maeModel3_fit <- MAE(predModel3, pp_train$LEB)
+maeModel3_fit
+maeModel4_fit <- MAE(predModel4, pp_train$LEB)
+maeModel4_fit
+
+#MAE of test
+maeModel2 <- MAE(predModel2, pp_test$LEB)
+maeModel2
+maeModel3 <- MAE(predModel3, pp_test$LEB)
+maeModel3
+maeModel4 <- MAE(predModel4, pp_test$LEB)
+maeModel4
+```
+We then compared the models created above to determine which model provided the most accurate prediction of life expectancy at birth.
+```{r}
+#Compare Models
+maeNull_fit
+maeNull
+maeFull_fit
+maeFull
+maeModel2_fit
+maeModel2
+maeModel3_fit
+maeModel3
+maeModel4_fit
+maeModel4
+```
+## Analysis conclusions
+
+When comparing the models, the full model, as well as models 2 and 3 have less error when fit to the test set than fitting to the training. This could be possible because of a few reasons. Being that our dataset is relatively small (~1800 total observations), a random 80/20 split could result in a test set that is very much like our training set statistically, but has less "noise."
+
+To dive deeper into this issue, we are going to experiment with cross validation in the next code chunk.
+
+Going off MAE, the models that performed the best were the null model and Model 4. However, this gives us no value in infering which predictors are most effective in capturing life expectancy. If we were going to choose a model to draw conclusions from at this point in analysis, we would choose Model 4 (although it having a very low R-squared value).
+
+Model 4 used the metric of obese adults per 1000 people and average body mass index. 
+This makes sense, these two metrics seem to be good descriptors of overall health of a population, and perhaps life expectancy.
+
+## Exploring cross validation
+
+To begin our cross validation efforts, we referenced a video on YouTube from The Data Science Show titled "Cross Validation using caret package in R". Source: https://www.youtube.com/watch?=Zd9GRoQjKvo, along with RPubs 
+Source: www.rpubs.com/StrategyExplorer/232768
+```{r}
+# Partition the data on LEB
+set.seed(1059)
+partitionRule <- createDataPartition(pp3$LEB, p = 0.7, list = F)
+# Create cross validation sets
+cvTrain <- pp3[partitionRule,]
+cvTest <- pp3[-partitionRule,]
+```
+Moving on to cross validation model testing.
+```{r}
+# Fix models to cv'd sets
+# Model2 <- lm(LEB ~ OA + OBA + HE_GDP, data = pp_train)
+# Model3 <- lm(LEB ~ avg_BMI + X5_14MR + HE_CAP, data = pp_train)
+# Model4 <- lm(LEB ~ OBA + avg_BMI, data = pp_train)
+
+cvModel2 <- train(LEB ~ OA + OBA + HE_GDP, data = cvTrain, trControl = trainControl(method = "cv", number = 10, verboseIter = TRUE))
+
+cvModel3 <- train(LEB ~ avg_BMI + X5_14MR + HE_CAP, data = cvTrain, trControl = trainControl(method = "cv", number = 10, verboseIter = TRUE))
+
+cvModel4 <- train(LEB ~ OBA + avg_BMI, data = cvTrain, trControl = trainControl(method = "cv", number = 10, verboseIter = TRUE))
+```
+Printing our models to see how they did.
+```{r}
+print(cvModel2)
+print(cvModel3)
+print(cvModel4)
+```
+## Cross validation analysis conclusions
+
+Based on our k-fold cross validation results, we would now pick Model 3 as our best model for prediction. 
+
+Model 3 included the variables "avg_BMI + X5_14MR + HE_CAP" (average BMI, mortality rate at age 5-14, and health expenditure per capita). With the best results in Root Mean Squared Error, Rsquared, and MAE, we would use Model 3 to predict life expectancy at birth. 
+
+
+
+
+
